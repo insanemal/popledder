@@ -23,8 +23,58 @@ from .acks import AckTracker, AckEvent
 class LedBleService:
     """Bleak client wrapper with a background asyncio loop.
 
-    This is designed so synchronous Flask routes can call into BLE safely.
+    Designed so synchronous Flask routes can call into BLE safely -- but the
+    server does NOT hold connections: every request should connect, act, then
+    disconnect (the OS BLE stack wedges if a link is left dangling).
     """
+
+    TARGET_SERVICE_UUID = "0000FFF0-0000-1000-8000-00805F9B34FB"
+    NAME_PREFIXES = ("YS", "TL")
+
+    @staticmethod
+    def discover(timeout: float = 6.0, *, include_all: bool = False) -> List[Dict[str, Any]]:
+        """Scan for compatible panels (FFF0 service advertised, or name prefix).
+
+        Returns sorted-by-signal list of {"address", "name", "rssi", "service_uuids"}.
+        """
+        if BleakClient is None:  # pragma: no cover
+            raise RuntimeError(f"bleak is not installed or failed to import: {_BLEAK_IMPORT_ERROR}")
+
+        from bleak import BleakScanner
+
+        target = LedBleService.TARGET_SERVICE_UUID.lower()
+
+        async def _scan():
+            try:
+                found = await BleakScanner.discover(timeout=timeout, return_adv=True)
+                items = found.values()
+            except TypeError:  # older bleak returns a list
+                found = await BleakScanner.discover(timeout=timeout)
+                items = [d for d in found if getattr(d, "details", None)]
+
+            out: List[Dict[str, Any]] = []
+            for d in items:
+                adv = getattr(d, "advertisement", d)
+                name = (getattr(adv, "local_name", "") or "") or ""
+                uuids = [u.lower() for u in (getattr(adv, "service_uuids", None) or [])]
+                rssi = getattr(adv, "rssi", None)
+                addr = getattr(d, "address", "")
+                matched = target in uuids or any(str(name).startswith(p) for p in LedBleService.NAME_PREFIXES)
+                if include_all or matched:
+                    out.append({
+                        "address": addr,
+                        "name": name,
+                        "rssi": rssi,
+                        "service_uuids": sorted(set(uuids)) or None,
+                    })
+            out.sort(key=lambda x: -(x["rssi"] if x["rssi"] is not None else -127))
+            return out
+
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_scan())
+        finally:
+            loop.close()
 
     def __init__(self, address: str, *, settings: Settings | None = None, uuids: BleUuids | None = None):
         self.address = address
