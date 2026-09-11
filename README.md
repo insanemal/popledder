@@ -1,8 +1,9 @@
 # popledder — LED Matrix panel controller
 
-Control a **64×64 RGB LED matrix panel over Bluetooth Low Energy (BLE)** — send
-text tickers, GIFs, images, brightness, power, and play-mode control, all from
-Python. Ships with two ways to drive the panel, a probing toolkit, and a full
+Control **16×16 / 32×32 / 64×64 RGB LED matrix panels** over Bluetooth Low
+Energy (BLE) — send text tickers, GIFs, images, brightness, power, and
+play-mode control, all from Python. Panel size is auto-detected per device.
+Ships with two ways to drive the panel, a probing toolkit, and a full
 wire-protocol reference reverse-engineered from the vendor's own app.
 
 ---
@@ -30,7 +31,7 @@ export DEVICE_ADDRESS=FF:25:12:09:30:DC
 # 5. Say hello — scroll a ticker
 python3 api_tools/meeting_status.py --text "HELLO"
 
-# 6. Or show a GIF (scaled to 64x64, loops forever)
+# 6. Or show a GIF (auto-scaled to the panel's size, loops forever)
 python3 api_tools/show_gif.py --file your.gif
 ```
 
