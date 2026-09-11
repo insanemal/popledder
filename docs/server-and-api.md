@@ -31,7 +31,13 @@ us repeatedly). Every BLE-touching endpoint:
 
 `/api/connect` and `/api/disconnect` are deprecated no-ops (kept only so the
 old control panel doesn't 500). `GET /api/status` is server config only (no
-BLE). Use `GET /api/discover` to find panels.
+BLE). Use `GET /api/discover` to find panels (`?with_size=1` reads each
+panel's dimensions).
+
+**Panel size:** image/gif/text auto-detect size from the device (`param_dev`)
+when `w`/`h` aren't supplied, cached per address (`PANEL_SIZE_CACHE_SECONDS`,
+0 = unlimited). `GET /api/device-info` reports `size` explicitly. Supported:
+16x16 / 32x32 / 64x64 (tested in hardware: 64x64 only).
 
 ## Endpoints
 

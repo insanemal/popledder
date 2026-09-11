@@ -31,9 +31,6 @@ from led_matrix_api.commands.high_level import (
 )
 from led_matrix_api.commands.protocol_builders import build_dispatch_play_payload
 
-PANEL_W = 64
-PANEL_H = 64
-
 FONT_CANDIDATES = [
     "/usr/share/fonts/noto/NotoSans-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -57,10 +54,14 @@ def render_ticker_frames(
     color: int,
     size: int,
     font_path: str,
-    gap: int = PANEL_W,
+    panel_w: int = 64,
+    panel_h: int = 64,
+    gap: int | None = None,
     step: int = 2,
 ) -> list[Image.Image]:
-    """Build one 64x64 frame per horizontal shift of a two-copy text strip."""
+    """Build one panel-sized frame per horizontal shift of a two-copy text strip."""
+    if gap is None:
+        gap = panel_w
     font = ImageFont.truetype(font_path, size)
 
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
@@ -71,16 +72,16 @@ def render_ticker_frames(
     # Strip layout: copy A at x=0, copy B at x=loop_len, plus one panel width
     # of trailer so the crop window never shows empty space.
     loop_len = text_w + gap  # shifting this far brings copy B into copy A's spot
-    strip_w = loop_len + PANEL_W
-    strip = Image.new("RGB", (strip_w, PANEL_H), (0, 0, 0))
+    strip_w = loop_len + panel_w
+    strip = Image.new("RGB", (strip_w, panel_h), (0, 0, 0))
     draw = ImageDraw.Draw(strip)
     fc = (color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF)
     for x in (0, loop_len):
-        draw.text((x, PANEL_H // 2), text, font=font, fill=fc, anchor="lm")
+        draw.text((x, panel_h // 2), text, font=font, fill=fc, anchor="lm")
 
     frames: list[Image.Image] = []
     for shift in range(0, loop_len, step):
-        frames.append(strip.crop((shift, 0, shift + PANEL_W, PANEL_H)))
+        frames.append(strip.crop((shift, 0, shift + panel_w, panel_h)))
     return frames
 
 
@@ -121,37 +122,53 @@ def main() -> int:
                         help="Send an explicit power-on command first (off by default; matches known-good sends)")
     parser.add_argument("--settle", type=float, default=1.0,
                         help="Seconds to hold the BLE link after sending before disconnecting")
+    parser.add_argument("--w", type=int, default=None, help="Panel width (default: auto-detect from device)")
+    parser.add_argument("--h", type=int, default=None, help="Panel height (default: auto-detect from device)")
     args = parser.parse_args()
 
     text = " ".join(str(args.text).split())  # collapse newlines/whitespace
 
-    # ---- Build the program (all offline) ----
-    print(f"Rendering ticker: '{text}' ...")
-    frames = render_ticker_frames(
-        text, color=args.color, size=args.size, font_path=args.font, step=args.step,
-    )
-    gif = frames_to_gif(frames, frame_ms=args.frame_ms)
     settings = Settings(
         device_address=args.address,
         ble_write_chunk=int(os.environ.get("BLE_WRITE_CHUNK", "180")),
         stream_chunk=int(os.environ.get("STREAM_CHUNK", "960")),
     )
-    payloads = pkts_program_image_payloads(
-        settings=settings,
-        image_bytes=gif,
-        mode="gif",
-        target_size=(PANEL_W, PANEL_H),
-    )
-    dispatch = build_dispatch_play_payload(id_pro=1, play_loop=65535, ignore_pgm_cmd=0)
-    print(f"  {len(frames)} frames, GIF {len(gif) // 1024} KB, "
-          f"{len(payloads) + 2} BLE payloads (~{sum(len(p) for p in payloads) // 1024} KB)")
 
-    # ---- Drive the panel over BLE ----
+    # ---- Connect first (needed for size auto-detection) ----
     ble = LedBleService(args.address, settings=settings)
     try:
         print(f"Connecting to {args.address} ...")
         ble.connect()
         print("  connected")
+
+        pw, ph = args.w or 64, args.h or 64
+        if args.w is None or args.h is None:
+            ble.send_payload(flags=settings.rt_show_flags, msg_type=0x03, payload=bytes([0x1B, 0x00]))
+            time.sleep(1.2)
+            for f in ble.parsed_frames[-20:]:
+                if f.msg_type == 0x83 and f.payload and f.payload[0] == 0x1B:
+                    d = f.payload[2:]
+                    if len(d) >= 5:
+                        pw = int.from_bytes(d[1:3], "little")
+                        ph = int.from_bytes(d[3:5], "little")
+        print(f"  panel size: {pw}x{ph}")
+
+        # ---- Build the program ----
+        print(f"Rendering ticker: '{text}' ...")
+        frames = render_ticker_frames(
+            text, color=args.color, size=args.size, font_path=args.font,
+            panel_w=pw, panel_h=ph, step=args.step,
+        )
+        gif = frames_to_gif(frames, frame_ms=args.frame_ms)
+        payloads = pkts_program_image_payloads(
+            settings=settings,
+            image_bytes=gif,
+            mode="gif",
+            target_size=(pw, ph),
+        )
+        dispatch = build_dispatch_play_payload(id_pro=1, play_loop=65535, ignore_pgm_cmd=0)
+        print(f"  {len(frames)} frames, GIF {len(gif) // 1024} KB, "
+              f"{len(payloads) + 2} BLE payloads (~{sum(len(p) for p in payloads) // 1024} KB)")
 
         if args.brightness is not None:
             ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type,

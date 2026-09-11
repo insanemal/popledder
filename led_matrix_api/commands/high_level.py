@@ -69,6 +69,8 @@ def rt_show_text_payloads(
     anim_time_stay: int = 3,
     include_anim: bool = True,
     interval: int = 0,
+    w: int = 64,
+    h: int = 64,
 ) -> List[bytes]:
     rotate90 = (int(rotate or 0) % 360) == 90
     header = build_text_header_packet_minimal(
@@ -110,7 +112,7 @@ def rt_show_text_payloads(
         data=stream_bytes,
         settings=settings,
     )
-    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect)
+    rect_def = build_rect_def_payload(data_save=data_save, id_pro=id_pro, id_rect=id_rect, w=int(w), h=int(h))
     return [rect_def, header] + stream_pkts
 
 def pkts_program_gif_payloads(

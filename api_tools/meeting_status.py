@@ -13,6 +13,7 @@ import argparse
 import io
 import json
 import sys
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib import error, request
@@ -62,6 +63,8 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
     parser.add_argument("--address", default=None,
                         help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
+    parser.add_argument("--w", type=int, default=None, help="Panel width (default: auto-detect via API)")
+    parser.add_argument("--h", type=int, default=None, help="Panel height (default: auto-detect via API)")
     parser.add_argument("--text", default="I am in a meeting")
     parser.add_argument("--color", type=lambda s: int(s, 0), default=0xFFFF00)
     parser.add_argument("--size", type=int, default=28)
@@ -72,19 +75,34 @@ def main() -> int:
     args = parser.parse_args()
 
     text = " ".join(str(args.text).split())
-    frames = render_ticker_frames(text, color=args.color, size=args.size,
-                                  font_path=args.font, step=args.step)
-    gif = frames_to_gif(frames, frame_ms=args.frame_ms)
 
     base = args.base_url.rstrip("/")
     extra = {"address": args.address} if args.address else {}
+
+    pw, ph = args.w or 64, args.h or 64
+    if args.w is None or args.h is None:
+        try:
+            q = ("?address=" + urllib.parse.quote(args.address)) if args.address else ""
+            req = request.Request(base + "/api/device-info" + q)
+            with request.urlopen(req, timeout=30) as resp:
+                info = json.loads(resp.read().decode())
+            if info.get("size") and info["size"].get("w") and info["size"].get("h"):
+                pw, ph = int(info["size"]["w"]), int(info["size"]["h"])
+        except Exception as e:
+            print(f"  (size auto-detect failed, using {pw}x{ph}: {e})", file=sys.stderr)
+    print(f"  panel size: {pw}x{ph}")
+
+    frames = render_ticker_frames(text, color=args.color, size=args.size,
+                                  font_path=args.font, panel_w=pw, panel_h=ph, step=args.step)
+    gif = frames_to_gif(frames, frame_ms=args.frame_ms)
+
     if args.brightness is not None:
         post_json(f"{base}/api/brightness", {"mode": "fixed", "value": args.brightness, "type": 0, **extra})
 
     try:
         result = post_multipart(
             f"{base}/api/image",
-            fields={"mode": "gif", "w": 64, "h": 64, **extra},
+            fields={"mode": "gif", "w": pw, "h": ph, **extra},
             file_field="file",
             filename="ticker.gif",
             data=gif,

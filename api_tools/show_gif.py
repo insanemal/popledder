@@ -13,6 +13,7 @@ import argparse
 import io
 import json
 import sys
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib import error, request
@@ -51,8 +52,8 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
     parser.add_argument("--address", default=None,
                         help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
-    parser.add_argument("--w", type=int, default=64)
-    parser.add_argument("--h", type=int, default=64)
+    parser.add_argument("--w", type=int, default=None)
+    parser.add_argument("--h", type=int, default=None)
     parser.add_argument("--brightness", type=int, default=None)
     args = parser.parse_args()
 
@@ -62,14 +63,28 @@ def main() -> int:
         return 2
     try:
         img = Image.open(str(path))
-        print(f"Source: {img.size[0]}x{img.size[1]}, {getattr(img, 'n_frames', 1)} frame(s) "
-              f"-> will scale to {args.w}x{args.h}")
+        n_frames = getattr(img, "n_frames", 1)
+        src = img.size
     except Exception as e:
         print(f"error: not a readable image ({e})", file=sys.stderr)
         return 2
 
     base = args.base_url.rstrip("/")
     extra = {"address": args.address} if args.address else {}
+
+    pw, ph = args.w or 64, args.h or 64
+    if args.w is None or args.h is None:
+        try:
+            q = ("?address=" + urllib.parse.quote(args.address)) if args.address else ""
+            req = request.Request(base + "/api/device-info" + q)
+            with request.urlopen(req, timeout=30) as resp:
+                info = json.loads(resp.read().decode())
+            if info.get("size") and info["size"].get("w") and info["size"].get("h"):
+                pw, ph = int(info["size"]["w"]), int(info["size"]["h"])
+        except Exception as e:
+            print(f"  (size auto-detect failed, using {pw}x{ph}: {e})", file=sys.stderr)
+    print(f"Source: {src[0]}x{src[1]}, {n_frames} frame(s) -> will scale to {pw}x{ph}")
+
     if args.brightness is not None:
         req = request.Request(
             f"{base}/api/brightness",
@@ -81,7 +96,7 @@ def main() -> int:
     try:
         result = post_multipart(
             f"{base}/api/image",
-            fields={"mode": "gif", "w": args.w, "h": args.h, **extra},
+            fields={"mode": "gif", "w": pw, "h": ph, **extra},
             file_field="file",
             filename=path.name,
             data=path.read_bytes(),

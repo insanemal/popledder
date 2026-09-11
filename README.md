@@ -39,6 +39,13 @@ no other app/process is holding a connection to it (see Troubleshooting).
 
 ---
 
+## Supported panel sizes
+
+Designed for **16×16, 32×32, and 64×64** panels (the size is auto-detected
+per panel via the `param_dev` query and cached per address). **Only 64×64 has
+been tested on real hardware** so far — if you run a smaller panel and hit a
+quirk, a patch is very welcome.
+
 ## Two ways to drive the panel
 
 | | `api_tools/` (HTTP API) | `cli_tools/` (direct BLE) |
@@ -89,11 +96,15 @@ endpoint instead does **connect → act → disconnect**. There is deliberately 
 "connect" endpoint; to target a specific panel pass `?address=` (GET) or
 `address` in the JSON/form body (POST). Defaults to `DEVICE_ADDRESS`.
 
+Panel **size is auto-detected** for image/gif/text sends (one `param_dev`
+query, then cached per address for `PANEL_SIZE_CACHE_SECONDS`); pass explicit
+`w`/`h` to override, e.g. a 32×32 panel with `-F w=32 -F h=32`.
+
 ### Endpoints
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/discover` | scan for panels (FFF0 service UUID or `YS`/`TL` name). `?timeout=6` |
+| `GET /api/discover` | scan for panels (FFF0 service UUID or `YS`/`TL` name). `?timeout=6`, `?with_size=1` (connect to each and read dimensions) |
 | `GET /api/status` | server config + recent-frame info (no BLE) |
 | `POST /api/power` | `{"on": true}` (or `false`) |
 | `POST /api/brightness` | `{"mode":"fixed","value":1..15}` or `{"mode":"schedule","entries":[{"value":N,"time":"HH:MM"}]}` |
@@ -129,6 +140,7 @@ curl http://127.0.0.1:5000/api/device-info
 | `DEVICE_ADDRESS` | *(empty)* | panel MAC, required for API/CLI when no `--address` |
 | `BLE_WRITE_CHUNK` | `180` | bytes per GATT write (180 proven reliable) |
 | `STREAM_CHUNK` | `960` | bytes per program TLV stream packet |
+| `PANEL_SIZE_CACHE_SECONDS` | `3600` | how long per-address panel size is remembered; `0` = unlimited |
 | `HOST` / `PORT` | `0.0.0.0` / `5000` | Flask bind |
 | `DEBUG` | `1` | Flask debug/reloader |
 

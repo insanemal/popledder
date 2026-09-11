@@ -14,6 +14,9 @@ class Settings:
     device_address: str
     ble_write_chunk: int = 248
     stream_chunk: int = 960
+    # How long to remember a panel's reported size per address.
+    # 0 = unlimited (never re-query). Default 1 hour.
+    panel_size_cache_seconds: float = 3600.0
 
     # Outer frame flags/type commonly used for rt_show
     rt_show_flags: int = 0xC1  # checksum enabled
@@ -30,6 +33,7 @@ class Settings:
             device_address=os.environ.get("DEVICE_ADDRESS", "").strip(),
             ble_write_chunk=int(os.environ.get("BLE_WRITE_CHUNK", "248")),
             stream_chunk=int(os.environ.get("STREAM_CHUNK", "960")),
+            panel_size_cache_seconds=float(os.environ.get("PANEL_SIZE_CACHE_SECONDS", "3600")),
             host=os.environ.get("HOST", "0.0.0.0"),
             port=int(os.environ.get("PORT", "5000")),
             debug=os.environ.get("DEBUG", "1") not in ("0", "false", "False", "no", "NO"),

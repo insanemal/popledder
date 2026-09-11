@@ -52,11 +52,11 @@ def send_acked(ble, settings, payloads, *, timeout_s: float = 2.0):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Show a GIF on the 64x64 LED panel (direct BLE)")
+    parser = argparse.ArgumentParser(description="Show a GIF on the LED panel (direct BLE)")
     parser.add_argument("--file", required=True, help="Path to the GIF to display")
     parser.add_argument("--address", default=DEFAULT_ADDRESS, help="BLE address of the panel")
-    parser.add_argument("--w", type=int, default=64, help="Target width in px (default 64)")
-    parser.add_argument("--h", type=int, default=64, help="Target height in px (default 64)")
+    parser.add_argument("--w", type=int, default=None, help="Target width in px (default: auto-detect)")
+    parser.add_argument("--h", type=int, default=None, help="Target height in px (default: auto-detect)")
     parser.add_argument("--brightness", type=int, default=None, help="Panel brightness (1-15) to set")
     parser.add_argument("--power-on", action="store_true",
                         help="Send an explicit power-on command first (off by default)")
@@ -78,7 +78,6 @@ def main() -> int:
     except Exception as e:
         print(f"error: not a readable image ({e})", file=sys.stderr)
         return 2
-    print(f"Source: {src[0]}x{src[1]}, {n_frames} frame(s) -> will scale to {args.w}x{args.h}")
 
     gif_bytes = path.read_bytes()
     settings = Settings(
@@ -87,22 +86,34 @@ def main() -> int:
         stream_chunk=int(os.environ.get("STREAM_CHUNK", "960")),
     )
 
-    # ---- Build the program (offline) ----
-    payloads = pkts_program_image_payloads(
-        settings=settings,
-        image_bytes=gif_bytes,
-        mode="gif",  # preserve animated GIF frames, scaled to target
-        target_size=(args.w, args.h),
-    )
-    dispatch = build_dispatch_play_payload(id_pro=1, play_loop=65535, ignore_pgm_cmd=0)
-    print(f"  {len(payloads) + 2} BLE payloads (~{sum(len(p) for p in payloads) // 1024} KB)")
-
-    # ---- Drive the panel over BLE ----
+    # ---- Connect first (needed for size auto-detection) ----
     ble = LedBleService(args.address, settings=settings)
     try:
         print(f"Connecting to {args.address} ...")
         ble.connect()
         print("  connected")
+
+        pw, ph = args.w or 64, args.h or 64
+        if args.w is None or args.h is None:
+            ble.send_payload(flags=settings.rt_show_flags, msg_type=0x03, payload=bytes([0x1B, 0x00]))
+            time.sleep(1.2)
+            for f in ble.parsed_frames[-20:]:
+                if f.msg_type == 0x83 and f.payload and f.payload[0] == 0x1B:
+                    d = f.payload[2:]
+                    if len(d) >= 5:
+                        pw = int.from_bytes(d[1:3], "little")
+                        ph = int.from_bytes(d[3:5], "little")
+        print(f"Source: {src[0]}x{src[1]}, {n_frames} frame(s) -> will scale to {pw}x{ph}")
+
+        # ---- Build the program ----
+        payloads = pkts_program_image_payloads(
+            settings=settings,
+            image_bytes=gif_bytes,
+            mode="gif",  # preserve animated GIF frames, scaled to target
+            target_size=(pw, ph),
+        )
+        dispatch = build_dispatch_play_payload(id_pro=1, play_loop=65535, ignore_pgm_cmd=0)
+        print(f"  {len(payloads) + 2} BLE payloads (~{sum(len(p) for p in payloads) // 1024} KB)")
 
         if args.brightness is not None:
             ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type,

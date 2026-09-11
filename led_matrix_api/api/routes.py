@@ -40,6 +40,36 @@ _LOCK = threading.Lock()
 _RECENT_FRAMES: List = []  # protocol.frame.ParsedFrame (for /api/debug/frames)
 _RECENT_ACKS: List = []    # ble.acks.AckEvent (for /api/debug/acks)
 
+# Per-address panel size cache: {address: (w, h, timestamp)}. TTL from
+# Settings.panel_size_cache_seconds (0 = unlimited). Stateless API, but panels
+# don't change size, so re-querying every request is wasteful.
+_SIZE_CACHE: Dict[str, tuple] = {}
+
+
+def _panel_size(settings: Settings, ble: LedBleService, address: str, w: int | None = None, h: int | None = None) -> tuple:
+    """Resolve a panel's (width, height): explicit w/h win, then cache,
+    then one param_dev query. Falls back to 64x64 on failure."""
+    if w is not None and h is not None and w > 0 and h > 0:
+        return int(w), int(h)
+    key = address
+    ttl = settings.panel_size_cache_seconds
+    now = time.time()
+    with _LOCK:
+        hit = _SIZE_CACHE.get(key)
+        if hit and (ttl == 0 or now - hit[2] < ttl):
+            return hit[0], hit[1]
+    pw = ph = 64
+    p = _send_get(ble, settings, 27, bytes([0x1B, 0x00]), wait_s=1.2)
+    if p:
+        d = _payload_data(p)
+        if len(d) >= 5:
+            pw, ph = int.from_bytes(d[1:3], "little"), int.from_bytes(d[3:5], "little")
+    if pw <= 0 or ph <= 0:
+        pw, ph = 64, 64
+    with _LOCK:
+        _SIZE_CACHE[key] = (pw, ph, now)
+    return pw, ph
+
 
 def _record_session(svc: LedBleService) -> None:
     with _LOCK:
@@ -262,11 +292,31 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
 
     @bp.get("/api/discover")
     def api_discover():
-        """Scan for compatible panels. ?timeout=6, ?include_all=1 to list everything."""
+        """Scan for compatible panels. ?timeout=6, ?include_all=1 to list
+        everything, ?with_size=1 to connect to each and read its dimensions."""
         timeout = float(request.args.get("timeout", 6))
         include_all = request.args.get("include_all", "0") == "1"
+        include_size = request.args.get("with_size", "0") == "1"
         try:
             devices = LedBleService.discover(timeout=timeout, include_all=include_all)
+            if include_size:
+                for d in devices:
+                    d["size"] = None
+                    svc = LedBleService(d["address"], settings=settings)
+                    try:
+                        svc.connect()
+                        p = _send_get(svc, settings, 27, bytes([0x1B, 0x00]), wait_s=1.0)
+                        if p:
+                            dd = _payload_data(p)
+                            if len(dd) >= 5:
+                                d["size"] = [int.from_bytes(dd[1:3], "little"), int.from_bytes(dd[3:5], "little")]
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            svc.disconnect()
+                        except Exception:
+                            pass
             return jsonify({"ok": True, "count": len(devices),
                             "matched_by": {"service_uuid": LedBleService.TARGET_SERVICE_UUID,
                                            "name_prefixes": list(LedBleService.NAME_PREFIXES)},
@@ -339,6 +389,10 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
             with _ble_session(g, address=_request_address(g)) as ble:
                 if not ble:
                     return jsonify({"ok": False, "error": "no device address (set DEVICE_ADDRESS or pass address)"}), 400
+                wf = body.get("w")
+                hf = body.get("h")
+                pw, ph = _panel_size(settings, ble, ble.address,
+                                     w=int(wf) if wf else None, h=int(hf) if hf else None)
                 payloads = rt_show_text_payloads(
                     settings=settings,
                     text=text,
@@ -346,6 +400,8 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
                     id_rect=int(body.get("id_rect", 1)),
                     id_item=int(body.get("id_item", 1)),
                     data_save=int(body.get("data_save", 0)),
+                    w=pw,
+                    h=ph,
                     font_color=(body.get("font_color") if "font_color" in body else body.get("color")),
                     bg_color=(body.get("bg_color") if "bg_color" in body else body.get("color_bg")),
                     code=int(body.get("code", 1)),
@@ -407,6 +463,10 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
             with _ble_session(g, address=_request_address(g)) as ble:
                 if not ble:
                     return jsonify({"ok": False, "error": "no device address (set DEVICE_ADDRESS or pass address)"}), 400
+                wf = request.form.get("w")
+                hf = request.form.get("h")
+                pw, ph = _panel_size(settings, ble, ble.address,
+                                     w=int(wf) if wf else None, h=int(hf) if hf else None)
                 payloads = pkts_program_gif_payloads(
                     settings=settings,
                     gif_bytes=b,
@@ -414,7 +474,7 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
                     id_rect=int(request.form.get("id_rect", 1)),
                     id_item=int(request.form.get("id_item", 1)),
                     data_save=int(request.form.get("data_save", 0)),
-                    target_size=(int(request.form.get("w", 64)), int(request.form.get("h", 64))) if request.form.get("w") or request.form.get("h") else (64, 64),
+                    target_size=(pw, ph),
                 )
                 res, _acked = _send_acked_many(ble, settings, payloads)
 
@@ -440,11 +500,15 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
             with _ble_session(g, address=_request_address(g)) as ble:
                 if not ble:
                     return jsonify({"ok": False, "error": "no device address (set DEVICE_ADDRESS or pass address)"}), 400
+                wf = request.form.get("w")
+                hf = request.form.get("h")
+                pw, ph = _panel_size(settings, ble, ble.address,
+                                     w=int(wf) if wf else None, h=int(hf) if hf else None)
                 payloads = pkts_program_image_payloads(
                     settings=settings,
                     image_bytes=b,
                     mode=str(request.form.get("mode", "gif")),
-                    target_size=(int(request.form.get("w", 64)), int(request.form.get("h", 64))) if request.form.get("w") or request.form.get("h") else (64, 64),
+                    target_size=(pw, ph),
                     id_pro=int(request.form.get("id_pro", 1)),
                     id_rect=int(request.form.get("id_rect", 1)),
                     id_item=int(request.form.get("id_item", 1)),
@@ -560,6 +624,9 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
                 p = _send_get(ble, settings, 27, bytes([0x1B, 0x00]))
                 if p:
                     out["param_dev"] = _decode_param_dev(_payload_data(p))
+                    pd = out["param_dev"]
+                    if pd.get("width") and pd.get("height"):
+                        out["size"] = {"w": pd["width"], "h": pd["height"]}
                 p = _send_get(ble, settings, 4, bytes([0x04, 0x00]))
                 if p:
                     d = _payload_data(p)
