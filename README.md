@@ -1,93 +1,196 @@
-# LED Matrix (popledder)
+# popledder — LED Matrix panel controller
 
-Control a 64x64 LED matrix panel over Bluetooth Low Energy (BLE).
+Control a **64×64 RGB LED matrix panel over Bluetooth Low Energy (BLE)** — send
+text tickers, GIFs, images, brightness, power, and play-mode control, all from
+Python. Ships with two ways to drive the panel, a probing toolkit, and a full
+wire-protocol reference reverse-engineered from the vendor's own app.
 
-**Fork layout:** this repo is a fork. `origin` = your fork
-(https://github.com/insanemal/popledder.git), `upstream` = the original
-(https://github.com/eskibars/popledder.git). Make branches + PRs back to
-upstream. The unpacked companion APK under `APK/` is git-ignored — never
-committed.
+---
+
+## Quickstart (first display in ~1 minute)
+
+```bash
+# 1. Install deps
+pip install -r requirements.txt
+
+# 2. Start the API server (uses DEVICE_ADDRESS from start_matrix_controller.sh)
+./start_matrix_controller.sh
+
+# 3. Find your panel (need the radio on + panel powered)
+curl "http://127.0.0.1:5000/api/discover"
+
+# 4. Say hello — scroll a ticker
+python3 api_tools/meeting_status.py --text "HELLO"
+
+# 5. Or show a GIF (scaled to 64x64, loops forever)
+python3 api_tools/show_gif.py --file your.gif
+```
+
+If discovery is empty: make sure the panel is powered and in BLE range, and that
+no other app/process is holding a connection to it (see Troubleshooting).
+
+---
 
 ## Two ways to drive the panel
 
-| Method | Folder | When to use |
+| | `api_tools/` (HTTP API) | `cli_tools/` (direct BLE) |
 |---|---|---|
-| **Web API** (`api_tools/`) | Python scripts that talk HTTP to the Flask server | normal use — no BLE contention |
-| **Direct BLE** (`cli_tools/`) | Python scripts that open BLE themselves | debugging when the server is stopped |
+| What | talks to the Flask server (`:5000`) | opens BLE itself |
+| Used for | normal, scripted, or multi-panel use | raw debugging, protocol experiments |
+| Needs | server running | server **stopped** |
 
-⚠️ Don't run `cli_tools/` while the server is up — two BLE clients on one panel
-collide. The server is the preferred owner.
+> ⚠️ **Never run `cli_tools/` while the server is up.** Two clients can't share
+> one panel — and the server is the recommended BLE owner. See Troubleshooting.
+
+### API tools
 
 ```bash
-# API tools (server must be running: ./start_matrix_controller.sh)
-python3 api_tools/meeting_status.py                     # scrolling "I am in a meeting"
-python3 api_tools/show_gif.py --file foo.gif            # any GIF -> 64x64, loops forever
-python3 api_tools/panel_probe.py                        # device info + play state
+python3 api_tools/meeting_status.py [--text "I am in a meeting"] [--color 0xFFFF00]
+python3 api_tools/show_gif.py --file dance.gif [--brightness 12]
+python3 api_tools/panel_probe.py                  # device info + play state
+python3 api_tools/set_play_mode.py --get
 python3 api_tools/set_play_mode.py --mode single --index 0 --ids 1
+python3 api_tools/set_play_mode.py --mode loop    # cycles the whole 60-slot queue
+python3 api_tools/clock_app.py                    # simple clock (API demo)
+```
 
-# Direct BLE tools (server stopped!)
+### CLI tools (server stopped)
+
+```bash
 python3 cli_tools/meeting_status.py
-python3 cli_tools/show_gif.py --file cli_tools/samples/minecraft.gif
-python3 cli_tools/panel_probe.py
+python3 cli_tools/show_gif.py --file your.gif
+python3 cli_tools/panel_probe.py --gets pgm_key=all
 python3 cli_tools/set_play_mode.py --get
 ```
 
-## API design (important)
+---
 
-- The server does **NOT hold BLE connections** — a held link wedges the OS BLE
-  stack and blinds everything (server + CLI tools). Every endpoint runs
-  **connect → act → disconnect**.
-- Target a specific panel with `?address=` (GET) or body/form `address`
-  (POST); defaults to `DEVICE_ADDRESS`.
-- `GET /api/discover` — scan for panels (FFF0 service UUID or `YS`/`TL` name).
-- There is deliberately **no connect/disconnect endpoint** (legacy no-ops kept
-  for the old control panel).
+## HTTP API
 
-## Layout
+Base `http://127.0.0.1:5000`. Every response is `{"ok": true...}` or
+`{"ok": false, "error": ...}`.
 
-| Path | What |
+### Connection model (read this)
+
+The server **never holds a BLE connection**. A held link wedges the OS BLE
+stack and blinds everything — the server *and* the CLI tools. Every BLE-touching
+endpoint instead does **connect → act → disconnect**. There is deliberately no
+"connect" endpoint; to target a specific panel pass `?address=` (GET) or
+`address` in the JSON/form body (POST). Defaults to `DEVICE_ADDRESS`.
+
+### Endpoints
+
+| Endpoint | Description |
 |---|---|
-| `led_matrix_api/ble/service.py` | `LedBleService` (client + `discover()`), ack tracking |
-| `led_matrix_api/protocol/` | frame build/parse (`AA55 FFFF …`), encoding, checksums |
-| `led_matrix_api/commands/` | payload builders (rt_show, program/image/GIF, power, brightness) |
-| `led_matrix_api/models/animations.py` | all text entrance animations + aliases |
-| `led_matrix_api/api/` | Flask app + routes (per-request BLE) |
-| `led_matrix_api/static/presets/` | bundled weather images |
-| `cli_tools/` | direct-BLE scripts (+ `samples/` gifs) |
-| `api_tools/` | HTTP-api equivalents of the CLI tools |
+| `GET /api/discover` | scan for panels (FFF0 service UUID or `YS`/`TL` name). `?timeout=6` |
+| `GET /api/status` | server config + recent-frame info (no BLE) |
+| `POST /api/power` | `{"on": true}` (or `false`) |
+| `POST /api/brightness` | `{"mode":"fixed","value":1..15}` or `{"mode":"schedule","entries":[{"value":N,"time":"HH:MM"}]}` |
+| `POST /api/text` | text (or `blocks`/`list_text`); `size`, `font_color` (decimal 0xRRGGBB), `anim`, `anim_speed`, `play_loop`, … |
+| `GET /api/text/animations` | all entrance animations + aliases |
+| `POST /api/image` | multipart `file`; `mode`=`gif\|rgb24\|palette`, `w`, `h`. ACK-paced, plays after |
+| `POST /api/gif` | multipart `file` (GIF only) |
+| `GET /api/image/presets` · `POST /api/image/preset` | bundled weather images |
+| `GET /api/play-mode` | current `{model, index, ids_pro}` |
+| `POST /api/play-mode` | `{"mode":"single\|loop\|list","index":N,"ids":[1]}` |
+| `GET /api/device-info` | dev_info, panel size, power/light/rotate, play state |
+| `GET /api/programs` | per-slot keys + `has_content` (occupancy) |
+| `GET/DELETE /api/debug/acks` · `GET/DELETE /api/debug/frames` | recent-session diagnostic ring buffer |
 
-## API endpoint cheat-sheet
+Examples:
 
-- `GET /api/discover` · `GET /api/status` (server config, no BLE)
-- `POST /api/power` · `POST /api/brightness` (fixed/schedule)
-- `POST /api/text` (multi-line blocks, animations) · `GET /api/text/animations`
-- `POST /api/image` / `POST /api/gif` (multipart `file`, ACK-paced, plays after)
-- `GET /api/image/presets` · `POST /api/image/preset`
-- `GET/POST /api/play-mode` — read/set pgm_play (`mode: single|loop|list`,
-  `index`, `ids`)
-- `GET /api/device-info` — dev_info, param_dev, power/light/rotate, pgm_play
-- `GET /api/programs` — per-slot keys (`has_content`)
-- `GET/DELETE /api/debug/acks` · `GET/DELETE /api/debug/frames` (recent sessions)
+```bash
+curl -X POST http://127.0.0.1:5000/api/power -H 'Content-Type: application/json' -d '{"on": true}'
+curl -X POST http://127.0.0.1:5000/api/brightness -H 'Content-Type: application/json' -d '{"mode":"fixed","value":10}'
+curl -X POST http://127.0.0.1:5000/api/text -H 'Content-Type: application/json' \
+     -d '{"text":"hi","size":16,"font_color":16777215,"anim":"scroll_left"}'
+curl -X POST http://127.0.0.1:5000/api/play-mode -H 'Content-Type: application/json' \
+     -d '{"mode":"single","index":0,"ids":[1]}'
+curl http://127.0.0.1:5000/api/device-info
+```
 
-## Requirements
+---
 
-`flask`, `bleak`, `pillow` (see `requirements.txt`). Python 3.10+.
+## Configuration
 
-Panel BLE address: `FF:25:12:09:30:DC` (env `DEVICE_ADDRESS`).
-Write chunk that works well: **180 bytes** (env `BLE_WRITE_CHUNK`).
+| Env var | Default | Meaning |
+|---|---|---|
+| `DEVICE_ADDRESS` | *(empty)* | panel MAC, required for API/CLI when no `--address` |
+| `BLE_WRITE_CHUNK` | `180` | bytes per GATT write (180 proven reliable) |
+| `STREAM_CHUNK` | `960` | bytes per program TLV stream packet |
+| `HOST` / `PORT` | `0.0.0.0` / `5000` | Flask bind |
+| `DEBUG` | `1` | Flask debug/reloader |
 
-## Key facts learned the hard way (READ THESE)
+`start_matrix_controller.sh` sets `DEVICE_ADDRESS=FF:25:12:09:30:DC` and
+`BLE_WRITE_CHUNK=180` for the dev panel.
 
-1. **Ack-pacing is mandatory.** Un-paced sends silently drop frames and the
-   panel shows nothing. All sends wait for each ACK.
-2. **No held BLE connections.** See API design above. This bit us repeatedly.
-3. **The panel answers "what's playing":** `get: pgm_play` → `{model, index,
-   ids_pro}`. `model` = play mode: 0 loop (full queue), 1 single, 2 custom list.
-4. **60-slot play queue by default; occupancy via `pgm_key`** — non-zero key =
-   content. Our panel has content only in slot 1.
-5. **Long text wraps** at 64px — that's why the ticker renders a GIF instead.
-6. **Frame types matter:** gets = type `0x03`, sets = type `0x02`.
+---
 
-See `docs/protocol-and-research.md` (deep dive), `docs/official-app-protocol.md`
-(full wire decode from the official LOY SPACE app), `docs/server-and-api.md`
-(endpoint details + known issues).
+## Project layout
+
+```
+led_matrix_api/
+  ble/service.py        LedBleService (client + discover()), ACK tracking
+  protocol/             frame build/parse (AA55 FFFF …), encoding, checksums
+  commands/             payload builders (rt_show, program/image/GIF, power…)
+  models/animations.py  text entrance animations + aliases
+  api/                  Flask app + routes (per-request BLE)
+  static/presets/       bundled weather images
+cli_tools/              direct-BLE scripts                (server must be stopped)
+api_tools/              HTTP-API mirrors + clock_app       (server must be running)
+docs/                   research + API + protocol references
+```
+
+---
+
+## Troubleshooting
+
+**"Device … was not found"** — the panel isn't advertising to *this* machine:
+power it on, bring it in BLE range, and make sure nothing else holds a
+connection to it.
+
+**It worked, now nothing is found (the BLE wedge).** If any process was killed
+while connected (server or CLI tool), the OS BLE stack can keep thinking the
+link is alive and the panel becomes invisible. Recovery: disconnect/forget the
+device on this machine (or restart Bluetooth / reboot), then re-run. This is why
+the server now uses per-request connect/disconnect — never kill it mid-request
+either.
+
+**Content "reverts" / attract-mode loops** — the panel plays its 60-slot default
+queue, and empty slots show the built-in demo. Pin one program with
+`dispatch` (done automatically after image/text sends) or set
+`/api/play-mode` to `single` / `list` with your program id.
+
+**GIF shows nothing** — make sure it's actually animated-GIF (a resized single
+image also works), ≤ reasonable size (a few MB), and the upload reports
+`acked` ≈ `sent_count`. Un-acked sends mean a flaky link, not a bad file.
+
+---
+
+## Development
+
+- Remotes: `origin` = your fork (`git@github.com:insanemal/popledder.git`),
+  `upstream` = original (`https://github.com/eskibars/popledder.git`).
+- Work on a branch, push, then open PRs to `upstream/main`:
+
+```bash
+git checkout -b my-feature
+git push -u origin my-feature          # then PR on GitHub
+git fetch upstream && git rebase upstream/main
+```
+
+- Never commit the unpacked `APK/` (git-ignored) or binaries you can't license.
+- Tests/experiments against a real panel are interactive — see `docs/`.
+
+## Docs
+
+- `docs/protocol-and-research.md` — the protocol + reliability rules, deep dive.
+- `docs/official-app-protocol.md` — full wire decode from the vendor's LOY SPACE
+  app (get/set commands, ACK tags, play modes, frame types).
+- `docs/server-and-api.md` — endpoint reference + known issues.
+
+## Credits
+
+Original project by Shane Connelly (eskibars); this fork extends it with the
+protocol decode of the official **LOY SPACE** Android app, the direct-BLE tools,
+and the per-request API model.
