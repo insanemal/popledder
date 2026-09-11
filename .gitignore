@@ -1,0 +1,9 @@
+# Unpacked companion APK and any extracted content — never commit
+/APK/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+.DS_Store
