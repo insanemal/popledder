@@ -74,6 +74,10 @@ python3 api_tools/load_slots.py --files a.gif b.gif c.gif --start-slot 1   # gif
 python3 api_tools/play_slot.py --slot 2                                     # display slot 2 on loop
 ```
 
+> **Preloaded slots survive power loss** (confirmed on hardware): content
+> loaded via `load_slots` stays in the panel across power cycles, so the
+> load-once → flip-instantly workflow is fully self-contained.
+
 Every tool accepts `--address <mac>` to target a specific panel (defaults to
 the server's `DEVICE_ADDRESS`).
 
