@@ -26,12 +26,15 @@ def api_get(base: str, path: str, timeout_s: float = 30.0) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only panel probe via web API")
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--address", default=None,
+                        help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
     parser.add_argument("--programs", action="store_true", help="Also dump per-slot keys")
     args = parser.parse_args()
 
     base = args.base_url.rstrip("/")
+    q = ("?address=" + urllib.parse.quote(args.address)) if args.address else ""
     try:
-        dev = api_get(base, "/api/device-info")
+        dev = api_get(base, "/api/device-info" + q)
     except error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         print(f"HTTP {e.code}: {body}", file=sys.stderr)
@@ -44,7 +47,7 @@ def main() -> int:
     print(json.dumps(dev, indent=2))
 
     try:
-        mode = api_get(base, "/api/play-mode")
+        mode = api_get(base, "/api/play-mode" + q)
         print("\n=== play-mode ===")
         print(json.dumps(mode, indent=2))
     except Exception as e:
@@ -52,7 +55,7 @@ def main() -> int:
 
     if args.programs:
         try:
-            progs = api_get(base, "/api/programs")
+            progs = api_get(base, "/api/programs" + q)
             print("\n=== programs (pgm_key) ===")
             print(json.dumps(progs, indent=2))
         except Exception as e:

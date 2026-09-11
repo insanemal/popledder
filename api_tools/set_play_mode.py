@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import urllib.parse
 from urllib import error, request
 
 
@@ -34,6 +35,8 @@ def api_post(base: str, path: str, payload: dict, timeout_s: float = 30.0) -> di
 def main() -> int:
     parser = argparse.ArgumentParser(description="Panel play-mode control via web API")
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--address", default=None,
+                        help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
     parser.add_argument("--get", action="store_true", help="Just query current play mode")
     parser.add_argument("--mode", choices=["single", "loop", "list"])
     parser.add_argument("--index", type=int, default=None)
@@ -45,12 +48,15 @@ def main() -> int:
         return 2
 
     base = args.base_url.rstrip("/")
+    q = ("?address=" + urllib.parse.quote(args.address)) if args.address else ""
     try:
         if args.get:
-            r = api_get(base, "/api/play-mode")
+            r = api_get(base, "/api/play-mode" + q)
             print(json.dumps(r, indent=2))
         if args.mode:
             payload: dict = {"mode": args.mode}
+            if args.address:
+                payload["address"] = args.address
             if args.index is not None:
                 payload["index"] = args.index
             if args.ids:

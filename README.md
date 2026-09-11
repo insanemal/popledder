@@ -16,13 +16,21 @@ pip install -r requirements.txt
 # 2. Start the API server (uses DEVICE_ADDRESS from start_matrix_controller.sh)
 ./start_matrix_controller.sh
 
-# 3. Find your panel (need the radio on + panel powered)
+# 3. Find your panel (radio on + panel powered)
 curl "http://127.0.0.1:5000/api/discover"
+#   -> grab the "address" of the panel you want (e.g. FF:25:12:09:30:DC)
 
-# 4. Say hello — scroll a ticker
+# 4. Point everything at it — either export it as the default...
+export DEVICE_ADDRESS=FF:25:12:09:30:DC
+
+#    ...or pass --address / ?address= per call (works for every tool/endpoint):
+#    python3 api_tools/meeting_status.py --address FF:25:12:09:30:DC ...
+#    curl "http://127.0.0.1:5000/api/device-info?address=FF:25:12:09:30:DC"
+
+# 5. Say hello — scroll a ticker
 python3 api_tools/meeting_status.py --text "HELLO"
 
-# 5. Or show a GIF (scaled to 64x64, loops forever)
+# 6. Or show a GIF (scaled to 64x64, loops forever)
 python3 api_tools/show_gif.py --file your.gif
 ```
 
@@ -53,6 +61,9 @@ python3 api_tools/set_play_mode.py --mode single --index 0 --ids 1
 python3 api_tools/set_play_mode.py --mode loop    # cycles the whole 60-slot queue
 python3 api_tools/clock_app.py                    # simple clock (API demo)
 ```
+
+Every tool accepts `--address <mac>` to target a specific panel (defaults to
+the server's `DEVICE_ADDRESS`).
 
 ### CLI tools (server stopped)
 

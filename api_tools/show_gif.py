@@ -49,6 +49,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Show a GIF on the panel via the web API")
     parser.add_argument("--file", required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--address", default=None,
+                        help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
     parser.add_argument("--w", type=int, default=64)
     parser.add_argument("--h", type=int, default=64)
     parser.add_argument("--brightness", type=int, default=None)
@@ -67,10 +69,11 @@ def main() -> int:
         return 2
 
     base = args.base_url.rstrip("/")
+    extra = {"address": args.address} if args.address else {}
     if args.brightness is not None:
         req = request.Request(
             f"{base}/api/brightness",
-            data=json.dumps({"mode": "fixed", "value": args.brightness, "type": 0}).encode(),
+            data=json.dumps({"mode": "fixed", "value": args.brightness, "type": 0, **extra}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
         with request.urlopen(req, timeout=10) as r:
             r.read()
@@ -78,7 +81,7 @@ def main() -> int:
     try:
         result = post_multipart(
             f"{base}/api/image",
-            fields={"mode": "gif", "w": args.w, "h": args.h},
+            fields={"mode": "gif", "w": args.w, "h": args.h, **extra},
             file_field="file",
             filename=path.name,
             data=path.read_bytes(),

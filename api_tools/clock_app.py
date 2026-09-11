@@ -60,6 +60,7 @@ def build_text_payload(*, align_h: str, align_v: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Clock demo app for matrix LED Flask API")
     parser.add_argument("--base-url", default="http://127.0.0.1:5000", help="API base URL")
+    parser.add_argument("--address", default=None, help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
     parser.add_argument("--interval", type=float, default=1.0, help="Refresh interval in seconds")
     parser.add_argument("--align-h", default="center", choices=["left", "center", "right"])
     parser.add_argument("--align-v", default="center", choices=["top", "center", "bottom"])
@@ -73,6 +74,8 @@ def main() -> int:
                 align_h=args.align_h,
                 align_v=args.align_v,
             )
+            if args.address is not None:
+                payload["address"] = args.address
             try:
                 result = post_json(url, payload)
             except error.HTTPError as e:

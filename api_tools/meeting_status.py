@@ -60,6 +60,8 @@ def post_json(url: str, payload: dict, timeout_s: float = 10.0) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="News-ticker message via the web API")
     parser.add_argument("--base-url", default="http://127.0.0.1:5000")
+    parser.add_argument("--address", default=None,
+                        help="Panel BLE address (defaults to server DEVICE_ADDRESS)")
     parser.add_argument("--text", default="I am in a meeting")
     parser.add_argument("--color", type=lambda s: int(s, 0), default=0xFFFF00)
     parser.add_argument("--size", type=int, default=28)
@@ -75,13 +77,14 @@ def main() -> int:
     gif = frames_to_gif(frames, frame_ms=args.frame_ms)
 
     base = args.base_url.rstrip("/")
+    extra = {"address": args.address} if args.address else {}
     if args.brightness is not None:
-        post_json(f"{base}/api/brightness", {"mode": "fixed", "value": args.brightness, "type": 0})
+        post_json(f"{base}/api/brightness", {"mode": "fixed", "value": args.brightness, "type": 0, **extra})
 
     try:
         result = post_multipart(
             f"{base}/api/image",
-            fields={"mode": "gif", "w": 64, "h": 64},
+            fields={"mode": "gif", "w": 64, "h": 64, **extra},
             file_field="file",
             filename="ticker.gif",
             data=gif,
