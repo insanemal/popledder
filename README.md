@@ -68,6 +68,10 @@ python3 api_tools/set_play_mode.py --get
 python3 api_tools/set_play_mode.py --mode single --index 0 --ids 1
 python3 api_tools/set_play_mode.py --mode loop    # cycles the whole 60-slot queue
 python3 api_tools/clock_app.py                    # simple clock (API demo)
+
+# Preload content once, then flip instantly (no re-upload):
+python3 api_tools/load_slots.py --files a.gif b.gif c.gif --start-slot 1   # gif -> slot per file
+python3 api_tools/play_slot.py --slot 2                                     # display slot 2 on loop
 ```
 
 Every tool accepts `--address <mac>` to target a specific panel (defaults to
@@ -80,6 +84,10 @@ python3 cli_tools/meeting_status.py
 python3 cli_tools/show_gif.py --file your.gif
 python3 cli_tools/panel_probe.py --gets pgm_key=all
 python3 cli_tools/set_play_mode.py --get
+
+# Preload content once, then flip instantly (no re-upload):
+python3 cli_tools/load_slots.py --files a.gif b.gif --start-slot 1
+python3 cli_tools/play_slot.py --slot 2
 ```
 
 ---
@@ -111,7 +119,7 @@ query, then cached per address for `PANEL_SIZE_CACHE_SECONDS`); pass explicit
 | `POST /api/brightness` | `{"mode":"fixed","value":1..15}` or `{"mode":"schedule","entries":[{"value":N,"time":"HH:MM"}]}` |
 | `POST /api/text` | text (or `blocks`/`list_text`); `size`, `font_color` (decimal 0xRRGGBB), `anim`, `anim_speed`, `play_loop`, … |
 | `GET /api/text/animations` | all entrance animations + aliases |
-| `POST /api/image` | multipart `file`; `mode`=`gif\|rgb24\|palette`, `w`, `h`. ACK-paced, plays after |
+| `POST /api/image` | multipart `file`; `mode`=`gif\|rgb24\|palette`, `w`, `h`. ACK-paced. `play=0` skips the display switch, `id_pro=N` targets a slot |
 | `POST /api/gif` | multipart `file` (GIF only) |
 | `GET /api/image/presets` · `POST /api/image/preset` | bundled weather images |
 | `GET /api/play-mode` | current `{model, index, ids_pro}` |

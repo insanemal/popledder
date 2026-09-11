@@ -479,15 +479,20 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
                 res, _acked = _send_acked_many(ble, settings, payloads)
 
                 play_loop = int(request.form.get("play_loop", 65535))
-                dispatch_payload = build_dispatch_play_payload(
-                    id_pro=int(request.form.get("id_pro", 1)),
-                    play_loop=play_loop,
-                    ignore_pgm_cmd=int(request.form.get("ignore_pgm_cmd", 0)),
-                )
-                ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch_payload)
+                dispatch = None
+                if request.form.get("play", "1") not in ("0", "false", "no", "False"):
+                    dispatch = build_dispatch_play_payload(
+                        id_pro=int(request.form.get("id_pro", 1)),
+                        play_loop=play_loop,
+                        ignore_pgm_cmd=int(request.form.get("ignore_pgm_cmd", 0)),
+                    )
+                    ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch)
 
+                if dispatch is None:
+                    return jsonify({"ok": True, "sent_count": len(res), "sent": res,
+                                    "note": "uploaded without dispatch (play=0)"})
                 return jsonify({"ok": True, "sent_count": len(res) + 1,
-                                "sent": res + [{"sno": None, "frame_len": len(dispatch_payload), "kind": "dispatch_play"}]})
+                                "sent": res + [{"sno": None, "frame_len": len(dispatch), "kind": "dispatch_play"}]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -517,15 +522,20 @@ def make_blueprint(*, settings: Settings | None = None) -> Blueprint:
                 res, _acked = _send_acked_many(ble, settings, payloads)
 
                 play_loop = int(request.form.get("play_loop", 65535))
-                dispatch_payload = build_dispatch_play_payload(
-                    id_pro=int(request.form.get("id_pro", 1)),
-                    play_loop=play_loop,
-                    ignore_pgm_cmd=int(request.form.get("ignore_pgm_cmd", 0)),
-                )
-                ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch_payload)
+                dispatch = None
+                if request.form.get("play", "1") not in ("0", "false", "no", "False"):
+                    dispatch = build_dispatch_play_payload(
+                        id_pro=int(request.form.get("id_pro", 1)),
+                        play_loop=play_loop,
+                        ignore_pgm_cmd=int(request.form.get("ignore_pgm_cmd", 0)),
+                    )
+                    ble.send_payload(flags=settings.rt_show_flags, msg_type=settings.rt_show_type, payload=dispatch)
 
+                if dispatch is None:
+                    return jsonify({"ok": True, "sent_count": len(res), "sent": res,
+                                    "note": "uploaded without dispatch (play=0)"})
                 return jsonify({"ok": True, "sent_count": len(res) + 1,
-                                "sent": res + [{"sno": None, "frame_len": len(dispatch_payload), "kind": "dispatch_play"}]})
+                                "sent": res + [{"sno": None, "frame_len": len(dispatch), "kind": "dispatch_play"}]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
